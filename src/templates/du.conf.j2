@@ -32,8 +32,8 @@ gNBs =
       #frequencyInfoDL
 
       # this is 3924.48 MHz (GSCN: 8141)
-      absoluteFrequencySSB                                             = 661632;
-      dl_frequencyBand                                                 = 77;
+      absoluteFrequencySSB                                             = 641280;
+      dl_frequencyBand                                                 = 78;
 
       # Absolute Frequency of Point A was calculated like this:
       # center_frequency - (bandwidth / 2)
@@ -42,17 +42,17 @@ gNBs =
       # In this case:
       # 3925 - (20 / 2)
       # this is 3915 MHz
-      dl_absoluteFrequencyPointA                                       = 661000;
+      dl_absoluteFrequencyPointA                                       = 640008;
       #scs-SpecificCarrierList
       dl_offstToCarrier                                              = 0;
       # subcarrierSpacing
       # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
       dl_subcarrierSpacing                                           = 1;
-      dl_carrierBandwidth                                            = 51;
+      dl_carrierBandwidth                                            = 106;
       #initialDownlinkBWP
       #genericParameters
       # this is RBstart=27,L=48 (275*(L-1))+RBstart
-      initialDLBWPlocationAndBandwidth                               = 13750;
+      initialDLBWPlocationAndBandwidth                               = 28875;
       # subcarrierSpacing
       # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
       initialDLBWPsubcarrierSpacing                                   = 1;
@@ -62,17 +62,17 @@ gNBs =
 
       #uplinkConfigCommon
       #frequencyInfoUL
-      ul_frequencyBand                                              = 77;
+      ul_frequencyBand                                              = 78;
       #scs-SpecificCarrierList
       ul_offstToCarrier                                             = 0;
       # subcarrierSpacing
       # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
       ul_subcarrierSpacing                                          = 1;
-      ul_carrierBandwidth                                           = 51;
+      ul_carrierBandwidth                                           = 106;
       pMax                                                          = 20;
       #initialUplinkBWP
       #genericParameters
-      initialULBWPlocationAndBandwidth                            = 13750;
+      initialULBWPlocationAndBandwidth                            = 28875;
       # subcarrierSpacing
       # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
       initialULBWPsubcarrierSpacing                               = 1;
@@ -204,7 +204,7 @@ RUs =
         nb_rx                         = 1
         att_tx                        = 12;
         att_rx                        = 12;
-        bands                         = [77];
+        bands                         = [78];
         max_pdschReferenceSignalPower = -27;
         max_rxgain                    = 114;
         eNB_instances                 = [0];
