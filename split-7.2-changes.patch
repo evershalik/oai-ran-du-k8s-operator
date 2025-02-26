@@ -1,0 +1,1523 @@
+diff --git a/charmcraft.yaml b/charmcraft.yaml
+index 2683e87..07cd45b 100644
+--- a/charmcraft.yaml
++++ b/charmcraft.yaml
+@@ -1,9 +1,9 @@
+ type: charm
+-name: oai-ran-du-k8s
++name: du
+ summary: Charmed Operator for the OAI RAN Distributed Unit (DU).
+ description: Charmed Operator for the OAI RAN Distributed Unit (DU).
+-base: ubuntu@24.04
+-build-base: ubuntu@24.04
++base: ubuntu@22.04
++build-base: ubuntu@22.04
+ platforms:
+   amd64:
+ 
+@@ -11,9 +11,9 @@ links:
+   website:
+     - https://charmhub.io/oai-ran-du-k8s
+   source:
+-    - https://github.com/canonical/oai-ran-du-k8s-operator
++    - https://github.com/Backend-Slayer/oai-ran-du-k8s-operator
+   issues:
+-    - https://github.com/canonical/oai-ran-du-k8s-operator/issues
++    - https://github.com/Backend-Slayer/oai-ran-du-k8s-operator/issues
+ 
+ containers:
+   du:
+@@ -31,7 +31,7 @@ resources:
+   du-image:
+     type: oci-image
+     description: Container image for the OAI RAN Distributed Unit (DU).
+-    upstream-source: ghcr.io/canonical/oai-ran-du:2.2.0
++    upstream-source: docker.io/shivank1128/oai-du:legacy
+ 
+ provides:
+   fiveg_rfsim:
+@@ -85,6 +85,7 @@ parts:
+       - libffi-dev
+       - libssl-dev
+       - pkg-config
++      - iproute2
+     build-snaps:
+       - astral-uv
+       - rustup
+diff --git a/src/charm.py b/src/charm.py
+index 5da09d1..15df09b 100755
+--- a/src/charm.py
++++ b/src/charm.py
+@@ -32,7 +32,8 @@ from ops.charm import CharmBase
+ from ops.pebble import Layer
+ 
+ from charm_config import CharmConfig, CharmConfigInvalidError, CNIType
+-from oai_ran_du_k8s import DUSecurityContext, DUUSBVolume
++from oai_ran_du_k8s import DUSecurityContext
++# , DUUSBVolume
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -62,12 +63,12 @@ class OAIRANDUOperator(CharmBase):
+             statefulset_name=self.app.name,
+             container_name=self._container_name,
+         )
+-        self._usb_volume = DUUSBVolume(
+-            namespace=self.model.name,
+-            statefulset_name=self.app.name,
+-            unit_name=self.unit.name,
+-            container_name=self._container_name,
+-        )
++        # self._usb_volume = DUUSBVolume(
++        #     namespace=self.model.name,
++        #     statefulset_name=self.app.name,
++        #     unit_name=self.unit.name,
++        #     container_name=self._container_name,
++        # )
+         try:
+             self._charm_config: CharmConfig = CharmConfig.from_charm(charm=self)
+         except CharmConfigInvalidError:
+@@ -123,10 +124,14 @@ class OAIRANDUOperator(CharmBase):
+             event.add_status(WaitingStatus("Waiting for statefulset to be patched"))
+             logger.info("Waiting for statefulset to be patched")
+             return
+-        if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
+-            event.add_status(WaitingStatus("Waiting for USB device to be mounted"))
+-            logger.info("Waiting for USB device to be mounted")
+-            return
++        # if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
++        #     event.add_status(WaitingStatus("Waiting for USB device to be mounted"))
++        #     logger.info("Waiting for USB device to be mounted")
++        #     return
++        # insert a new SR-IOV VF check:
++        if not self._charm_config.simulation_mode and not self._du_security_context.sriov_vfs_attached():
++            event.add_status(WaitingStatus("Waiting for SR-IOV resources to be attached"))
++            logger.info("Waiting for SR-IOV resources to be attached")
+         if not self._relation_created(F1_RELATION_NAME):
+             event.add_status(BlockedStatus("Waiting for F1 relation to be created"))
+             logger.info("Waiting for F1 relation to be created")
+@@ -164,8 +169,10 @@ class OAIRANDUOperator(CharmBase):
+             return
+         if not self._du_security_context.is_privileged():
+             self._du_security_context.set_privileged()
+-        if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
+-            self._usb_volume.mount()
++        # if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
++        #     self._usb_volume.mount()
++        if not self._charm_config.simulation_mode and not self._du_security_context.sriov_vfs_attached():
++            self._du_security_context.attach_sriov_resources()
+         if not self._relation_created(F1_RELATION_NAME):
+             return
+         if not self._container.can_connect():
+@@ -425,7 +432,8 @@ class OAIRANDUOperator(CharmBase):
+         if self._charm_config.simulation_mode:
+             rfsim_switch = "--rfsim"
+ 
+-        return f"/opt/oai-gnb/bin/nr-softmodem -O {BASE_CONFIG_PATH}/{CONFIG_FILE_NAME} {three_quarter_sampling}--continuous-tx {rfsim_switch}"  # noqa: E501
++        # return f"/opt/oai-du/bin/oai_du_7.2x -O {BASE_CONFIG_PATH}/{CONFIG_FILE_NAME} {three_quarter_sampling}--continuous-tx {rfsim_switch}"  # noqa: E501
++        return f"sleep 10000000000"  # noqa: E501
+ 
+     @property
+     def _du_environment_variables(self) -> dict:
+diff --git a/src/oai_ran_du_k8s.py b/src/oai_ran_du_k8s.py
+index 760abea..47bc4ef 100644
+--- a/src/oai_ran_du_k8s.py
++++ b/src/oai_ran_du_k8s.py
+@@ -2,22 +2,22 @@
+ # Copyright 2024 Canonical Ltd.
+ # See LICENSE file for licensing details.
+ 
+-"""Module used to set a privileged context for Kubernetes Statefulset containers."""
++"""Module used to set a privileged context for Kubernetes Statefulset containers
++   and handle SR-IOV VF + hugepages resources.
++"""
+ 
+ import logging
+-from typing import Iterable
+ 
+ from lightkube import Client
+ from lightkube.core.exceptions import ApiError
+-from lightkube.models.apps_v1 import StatefulSetSpec
+-from lightkube.models.core_v1 import Container, HostPathVolumeSource, Volume, VolumeMount
++from lightkube.models.core_v1 import Container, ResourceRequirements
+ from lightkube.resources.apps_v1 import StatefulSet
+ 
+ logger = logging.getLogger(__name__)
+ 
+ 
+ class OAIDUK8sError(Exception):
+-    """K8sPrivilegedError."""
++    """Generic error for OAI DU K8s operations."""
+ 
+     def __init__(self, message: str):
+         self.message = message
+@@ -25,7 +25,7 @@ class OAIDUK8sError(Exception):
+ 
+ 
+ class DUSecurityContext:
+-    """Class used to update Kubernetes Statefulset to run containers in privileged context."""
++    """Class used to update the Kubernetes Statefulset for OAI DU container."""
+ 
+     def __init__(
+         self,
+@@ -39,7 +39,7 @@ class DUSecurityContext:
+         self.namespace = namespace
+ 
+     def is_privileged(self) -> bool:
+-        """Check whether the container in the Statefulset runs in privileged context.
++        """Check whether the container in the StatefulSet runs in privileged context.
+ 
+         Returns:
+             bool: True if the container is privileged, otherwise False
+@@ -65,7 +65,7 @@ class DUSecurityContext:
+         return True
+ 
+     def set_privileged(self) -> None:
+-        """Patch the Statefulset to run container in privileged context."""
++        """Patch the StatefulSet to run container in privileged context and add extra capabilities."""
+         try:
+             statefulset = self.k8s_client.get(
+                 res=StatefulSet,
+@@ -75,149 +75,131 @@ class DUSecurityContext:
+             container = next(
+                 filter(
+                     lambda ctr: ctr.name == self.container_name,
+-                    statefulset.spec.template.spec.containers,  # type: ignore[union-attr]
++                    statefulset.spec.template.spec.containers,
+                 )
+             )
+             container.securityContext.privileged = True
++
++            # Add extra capabilities
++            if not container.securityContext.capabilities:
++                container.securityContext.capabilities = {"add": ["IPC_LOCK", "SYS_ADMIN"]}
++            else:
++                container.securityContext.capabilities.add = ["IPC_LOCK", "SYS_ADMIN"]
++
+             self.k8s_client.replace(obj=statefulset)
+-            logger.info("Container %s patched", self.container_name)
++            logger.info("Container %s patched for privileged mode with extra capabilities", self.container_name)
+         except ApiError:
+             raise OAIDUK8sError(f"Could not get statefulset {self.statefulset_name}")
+         except StopIteration:
+             raise OAIDUK8sError(f"Could not get container {self.container_name}")
+ 
+-
+-class DUUSBVolume:
+-    """Class used to mount USB device to the DU container."""
+-
+-    USB_MOUNT_PATH = "/dev/bus/usb"
+-
+-    def __init__(
+-        self,
+-        namespace: str,
+-        statefulset_name: str,
+-        unit_name: str,
+-        container_name: str,
+-    ):
+-        self.k8s_client = Client()
+-        self.statefulset_name = statefulset_name
+-        self.unit_name = unit_name
+-        self.container_name = container_name
+-        self.namespace = namespace
+-        self.k8s_client = Client()
+-        self.usb_volume = Volume(
+-            name="usb",
+-            hostPath=HostPathVolumeSource(path=self.USB_MOUNT_PATH, type=""),
+-        )
+-        self.usb_volumemount = VolumeMount(
+-            name=self.usb_volume.name,
+-            mountPath=self.USB_MOUNT_PATH,
+-        )
+-
+-    def is_mounted(self) -> bool:
+-        """Check whether the USB volume is mounted."""
+-        return self._container_is_patched() and self._statefulset_is_patched()
+-
+-    def _container_is_patched(self) -> bool:
+-        try:
+-            statefulset = self.k8s_client.get(
+-                res=StatefulSet, name=self.statefulset_name, namespace=self.namespace
+-            )
+-        except ApiError as e:
+-            if e.status.reason == "Unauthorized":
+-                logger.debug("kube-apiserver not ready yet")
+-            else:
+-                raise OAIDUK8sError(f"Container `{self.container_name}` not found")
+-            logger.info("Container `%s` not found", self.container_name)
+-            return False
+-        pod_has_usb_volumemount = self._pod_has_usb_volumemount(
+-            usb_volumemount=self.usb_volumemount,
+-            containers=statefulset.spec.template.spec.containers,  # type: ignore[union-attr]
+-            container_name=self.container_name,
+-        )
+-        logger.info(
+-            "Container `%s` has USB volume mounted: %s",
+-            self.container_name,
+-            pod_has_usb_volumemount,
+-        )
+-        return pod_has_usb_volumemount
+-
+-    def _statefulset_is_patched(self) -> bool:
++    def sriov_vfs_attached(self) -> bool:
++        """Check if our container requests 2 SR-IOV VFs + 10Gi of hugepages."""
+         try:
+             statefulset = self.k8s_client.get(
+-                res=StatefulSet, name=self.statefulset_name, namespace=self.namespace
++                res=StatefulSet,
++                name=self.statefulset_name,
++                namespace=self.namespace,
+             )
+-        except ApiError as e:
+-            if e.status.reason == "Unauthorized":
+-                logger.debug("kube-apiserver not ready yet")
+-            else:
+-                raise OAIDUK8sError(f"Could not get statefulset `{self.statefulset_name}`")
+-            logger.info("Statefulset `%s` not found", self.statefulset_name)
+-            return False
++        except ApiError:
++            raise OAIDUK8sError(f"Could not get statefulset {self.statefulset_name}")
+ 
+-        statefulset_has_usb_volume = self._statefulset_has_usb_volume(
+-            statefulset_spec=statefulset.spec,  # type: ignore[arg-type]
+-            usb_volume=self.usb_volume,
+-        )
+-        logger.info(
+-            "Statefulset `%s` has USB volume: %s",
+-            self.statefulset_name,
+-            statefulset_has_usb_volume,
++        # find container
++        container = next(
++            (
++                ctr for ctr in statefulset.spec.template.spec.containers  # type: ignore[union-attr]
++                if ctr.name == self.container_name
++            ),
++            None,
+         )
+-        return statefulset_has_usb_volume
+-
+-    @staticmethod
+-    def _statefulset_has_usb_volume(
+-        statefulset_spec: StatefulSetSpec,
+-        usb_volume: Volume,
+-    ) -> bool:
+-        if not statefulset_spec.template.spec:
+-            logger.info("Statefulset has no template spec")
+-            return False
+-        if not statefulset_spec.template.spec.volumes:
+-            logger.info("Statefulset has no volumes")
+-            return False
+-        return usb_volume in statefulset_spec.template.spec.volumes
+-
+-    @classmethod
+-    def _get_container(cls, container_name: str, containers: Iterable[Container]) -> Container:
+-        try:
+-            return next(filter(lambda ctr: ctr.name == container_name, containers))
+-        except StopIteration:
+-            raise OAIDUK8sError(f"Container `{container_name}` not found")
++        if not container:
++            raise OAIDUK8sError(f"Container {self.container_name} not found")
+ 
+-    def _pod_has_usb_volumemount(
+-        self,
+-        containers: Iterable[Container],
+-        container_name: str,
+-        usb_volumemount: VolumeMount,
+-    ) -> bool:
+-        container = self._get_container(container_name=container_name, containers=containers)
+-        if not container.volumeMounts:
+-            return False
+-        return usb_volumemount in container.volumeMounts
++        # get existing requests
++        requests = getattr(getattr(container, "resources", None), "requests", {}) or {}
++        sriov = requests.get("intel.com/intel_oran_sriov", "0")
++        hugepages = requests.get("hugepages-1Gi", "0")
+ 
+-    def mount(self) -> None:
+-        """Mount USB volume."""
++        # If the container requests 2 SR-IOV VFs & 10Gi hugepages, consider them "attached"
++        return sriov == "2" and hugepages == "10Gi"
++
++    def attach_sriov_resources(self) -> None:
++        """Patch the StatefulSet to request 2 SR-IOV VFs, 10Gi of hugepages, and add mounts."""
+         try:
+             statefulset = self.k8s_client.get(
+-                res=StatefulSet, name=self.statefulset_name, namespace=self.namespace
++                res=StatefulSet,
++                name=self.statefulset_name,
++                namespace=self.namespace,
+             )
+         except ApiError:
+-            raise OAIDUK8sError(f"Could not get statefulset `{self.statefulset_name}`")
++            raise OAIDUK8sError(f"Could not get statefulset {self.statefulset_name}")
+ 
+-        containers: Iterable[Container] = statefulset.spec.template.spec.containers  # type: ignore[union-attr]
+-        container = self._get_container(container_name=self.container_name, containers=containers)
++        containers = statefulset.spec.template.spec.containers  # type: ignore[union-attr]
++        container = next((c for c in containers if c.name == self.container_name), None)
++        if not container:
++            raise OAIDUK8sError(f"Container {self.container_name} not found")
++
++        if not container.resources:
++            container.resources = ResourceRequirements()
++
++        if not container.resources.requests:
++            container.resources.requests = {}
++        if not container.resources.limits:
++            container.resources.limits = {}
++
++        # Patch resource requests and limits for SR-IOV and hugepages
++        container.resources.requests["intel.com/intel_oran_sriov"] = "2"
++        container.resources.limits["intel.com/intel_oran_sriov"] = "2"
++        container.resources.requests["hugepages-1Gi"] = "10Gi"
++        container.resources.limits["hugepages-1Gi"] = "10Gi"
++        container.resources.requests["cpu"] = "8"
++        container.resources.limits["cpu"] = "8"
++        container.resources.requests["memory"] = "16Gi"
++        container.resources.limits["memory"] = "16Gi"
++
++        # ---- Add volume mounts ----
++
++        # Ensure volumes list exists
++        if not statefulset.spec.template.spec.volumes:
++            statefulset.spec.template.spec.volumes = []
++
++        # Add a volume for hugepages if not present
++        if not any(vol.name == "hugepages" for vol in statefulset.spec.template.spec.volumes):
++            statefulset.spec.template.spec.volumes.append({
++                "name": "hugepages",
++                "emptyDir": {"medium": "HugePages"}
++            })
++
++        # Add a volume for dpdk (hostPath mount)
++        if not any(vol.name == "dpdk" for vol in statefulset.spec.template.spec.volumes):
++            statefulset.spec.template.spec.volumes.append({
++                "name": "dpdk",
++                "hostPath": {"path": "/var/run/dpdk"}
++            })
++
++        # Ensure the container has a volumeMounts list
+         if not container.volumeMounts:
+-            container.volumeMounts = [self.usb_volumemount]
+-        else:
+-            container.volumeMounts.append(self.usb_volumemount)
+-        if not statefulset.spec.template.spec.volumes:  # type: ignore[union-attr]
+-            statefulset.spec.template.spec.volumes = [self.usb_volume]  # type: ignore[union-attr]
+-        else:
+-            statefulset.spec.template.spec.volumes.append(self.usb_volume)  # type: ignore[union-attr]
++            container.volumeMounts = []
++
++        # Add mount for hugepages into container
++        if not any(vm.name == "hugepages" for vm in container.volumeMounts):
++            container.volumeMounts.append({
++                "name": "hugepages",
++                "mountPath": "/dev/hugepages"
++            })
++
++        # Add mount for dpdk
++        if not any(vm.name == "dpdk" for vm in container.volumeMounts):
++            container.volumeMounts.append({
++                "name": "dpdk",
++                "mountPath": "/var/run/dpdk"
++            })
++
+         try:
+             self.k8s_client.replace(obj=statefulset)
+-        except ApiError:
+-            raise OAIDUK8sError(f"Could not replace statefulset `{self.statefulset_name}`")
+-        logger.info("Replaced `%s` statefulset", self.statefulset_name)
++            logger.info(
++                "Patched StatefulSet %s with SR-IOV=2, hugepages=10Gi, and mounted hugepages and dpdk",
++                self.statefulset_name,
++            )
++        except ApiError as e:
++            raise OAIDUK8sError(f"Could not patch statefulset: {e}")
+diff --git a/src/templates/du.conf.j2 b/src/templates/du.conf.j2
+index ccd2982..05770dd 100644
+--- a/src/templates/du.conf.j2
++++ b/src/templates/du.conf.j2
+@@ -1,16 +1,21 @@
+-Active_gNBs = ( "{{ gnb_name }}" );
++Active_gNBs = ( "{{ gnb_name }}");
++# Asn1_verbosity, choice in: none, info, annoying
+ Asn1_verbosity = "none";
+-sa = 1;
+ 
+ gNBs =
+ (
+-{
+-        gNB_ID    = 0xe00;
+-        gNB_DU_ID = 0xe00;
+-        gNB_name  =  "{{ gnb_name }}";
++ {
++    ////////// Identification parameters:
++    gNB_ID = 0xe00;
++    gNB_DU_ID = 0xe00;
++
++#     cell_type =  "CELL_MACRO_GNB";
++
++    gNB_name  =  "{{ gnb_name }}";
+ 
+-        tracking_area_code = {{ tac }};
+-        plmn_list =
++    // Tracking area code, 0x0000 and 0xfffe are reserved values
++    tracking_area_code  =  {{ tac }};
++    plmn_list =
+         (
+             {% for plmn in plmn_list -%}
+             {
+@@ -31,223 +36,258 @@ gNBs =
+             {% endif %}
+             {%- endfor %}
+         );
+-        nr_cellid        = 12345678L;
+-        min_rxtxtime     = 6;
+-        do_CSIRS                                                  = 0;
+-        do_SRS                                                    = 0;
+ 
+-        force_256qam_off = 1;
++    nr_cellid = 12345678L;
++
++    ////////// Physical parameters:
++
++    pdsch_AntennaPorts_XP = 2;
++    pusch_AntennaPorts    = 4;
++    do_CSIRS              = 1;
++    do_SRS                = 0 ;
++    sib1_tda                      = 15;
++
++    pdcch_ConfigSIB1 = (
++      {
++        controlResourceSetZero = 11;
++        searchSpaceZero = 0;
++      }
++    );
+ 
+     servingCellConfigCommon = (
+     {
++ #spCellConfigCommon
++
+       physCellId                                                    = 0;
+-      #frequencyInfoDL
+-
+-      # this is 3924.48 MHz (GSCN: 8141)
+-      absoluteFrequencySSB                                             = 661632;
+-      dl_frequencyBand                                                 = 77;
+-
+-      # Absolute Frequency of Point A was calculated like this:
+-      # center_frequency - (bandwidth / 2)
+-      # the bandwidth in this case is 20 MHz, based on numerology 1
+-      # and 51 PRBs.
+-      # In this case:
+-      # 3925 - (20 / 2)
+-      # this is 3915 MHz
+-      dl_absoluteFrequencyPointA                                       = 660332;
++
++#  downlinkConfigCommon
++    #frequencyInfoDL
++      # this is 3600 MHz + 43 PRBs@30kHz SCS (same as initial BWP)
++      absoluteFrequencySSB                                          = 630048;
++      dl_frequencyBand                                                 = 78;
++      # this is 3600 MHz
++      dl_absoluteFrequencyPointA                                       = 626772;
+       #scs-SpecificCarrierList
+-      dl_offstToCarrier                                              = 0;
+-      # subcarrierSpacing
+-      # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
+-      dl_subcarrierSpacing                                           = 1;
+-      dl_carrierBandwidth                                            = 106;
+-      #initialDownlinkBWP
++        dl_offstToCarrier                                              = 0;
++# subcarrierSpacing
++# 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
++        dl_subcarrierSpacing                                           = 1;
++        dl_carrierBandwidth                                            = 273;
++     #initialDownlinkBWP
+       #genericParameters
+-      # this is RBstart=27,L=48 (275*(L-1))+RBstart
+-      initialDLBWPlocationAndBandwidth                               = 28875;
+-      # subcarrierSpacing
+-      # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
+-      initialDLBWPsubcarrierSpacing                                   = 1;
++        # this is RBstart=27,L=48 (275*(L-1))+RBstart
++        initialDLBWPlocationAndBandwidth                               = 1099; # 6366 12925 12956 28875 12952
++# subcarrierSpacing
++# 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
++        initialDLBWPsubcarrierSpacing                                           = 1;
+       #pdcch-ConfigCommon
+-      initialDLBWPcontrolResourceSetZero                              = 12;
+-      initialDLBWPsearchSpaceZero                                     = 0;
++        initialDLBWPcontrolResourceSetZero                              = 11;
++        initialDLBWPsearchSpaceZero                                             = 0;
+ 
+-      #uplinkConfigCommon
+-      #frequencyInfoUL
+-      ul_frequencyBand                                              = 77;
++  #uplinkConfigCommon
++     #frequencyInfoUL
++      ul_frequencyBand                                                 = 78;
+       #scs-SpecificCarrierList
+-      ul_offstToCarrier                                             = 0;
+-      # subcarrierSpacing
+-      # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
+-      ul_subcarrierSpacing                                          = 1;
+-      ul_carrierBandwidth                                           = 106;
+-      pMax                                                          = 20;
+-      #initialUplinkBWP
++      ul_offstToCarrier                                              = 0;
++# subcarrierSpacing
++# 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
++      ul_subcarrierSpacing                                           = 1;
++      ul_carrierBandwidth                                            = 273;
++      pMax                                                          = 23;
++     #initialUplinkBWP
+       #genericParameters
+-      initialULBWPlocationAndBandwidth                            = 28875;
+-      # subcarrierSpacing
+-      # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
+-      initialULBWPsubcarrierSpacing                               = 1;
++        initialULBWPlocationAndBandwidth                            = 1099;
++# subcarrierSpacing
++# 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
++        initialULBWPsubcarrierSpacing                                           = 1;
+       #rach-ConfigCommon
+-      #rach-ConfigGeneric
+-      prach_ConfigurationIndex                                  = 98;
+-      #prach_msg1_FDM
+-      #0 = one, 1=two, 2=four, 3=eight
+-      prach_msg1_FDM                                            = 0;
+-      prach_msg1_FrequencyStart                                 = 0;
+-      zeroCorrelationZoneConfig                                 = 13;
+-      preambleReceivedTargetPower                               = -96;
+-      #preamblTransMax (0...10) = (3,4,5,6,7,8,10,20,50,100,200)
+-      preambleTransMax                                          = 6;
+-      #powerRampingStep
+-      # 0=dB0,1=dB2,2=dB4,3=dB6
+-      powerRampingStep                                            = 1;
+-      #ra_ReponseWindow
+-      #1,2,4,8,10,20,40,80
+-      ra_ResponseWindow                                           = 4;
+-      #ssb_perRACH_OccasionAndCB_PreamblesPerSSB_PR
+-      #1=oneeighth,2=onefourth,3=half,4=one,5=two,6=four,7=eight,8=sixteen
+-      ssb_perRACH_OccasionAndCB_PreamblesPerSSB_PR                = 4;
+-      #oneHalf (0..15) 4,8,12,16,...60,64
+-      ssb_perRACH_OccasionAndCB_PreamblesPerSSB                   = 14;
+-      #ra_ContentionResolutionTimer
+-      #(0..7) 8,16,24,32,40,48,56,64
+-      ra_ContentionResolutionTimer                                = 7;
+-      rsrp_ThresholdSSB                                           = 19;
+-      #prach-RootSequenceIndex_PR
+-      #1 = 839, 2 = 139
+-      prach_RootSequenceIndex_PR                                  = 2;
+-      prach_RootSequenceIndex                                     = 1;
+-      # SCS for msg1, can only be 15 for 30 kHz < 6 GHz, takes precedence over the one derived from prach-ConfigIndex
+-      #
+-      msg1_SubcarrierSpacing                                      = 1,
+-      # restrictedSetConfig
+-      # 0=unrestricted, 1=restricted type A, 2=restricted type B
+-      restrictedSetConfig                                         = 0,
+-
+-      msg3_DeltaPreamble                                          = 1;
+-      p0_NominalWithGrant                                         =-90;
+-
+-      # pucch-ConfigCommon setup :
+-      # pucchGroupHopping
+-      # 0 = neither, 1= group hopping, 2=sequence hopping
+-      pucchGroupHopping                                           = 0;
+-      hoppingId                                                   = 40;
+-      p0_nominal                                                  = -90;
+-      # ssb_PositionsInBurs_BitmapPR
+-      # 1=short, 2=medium, 3=long
++        #rach-ConfigGeneric
++          prach_ConfigurationIndex                                  = 159;
++#prach_msg1_FDM
++#0 = one, 1=two, 2=four, 3=eight
++          prach_msg1_FDM                                            = 0;
++          prach_msg1_FrequencyStart                                 = 22;
++          zeroCorrelationZoneConfig                                 = 15;
++          preambleReceivedTargetPower                               = -104;
++#preamblTransMax (0...10) = (3,4,5,6,7,8,10,20,50,100,200)
++          preambleTransMax                                          = 7;
++#powerRampingStep
++# 0=dB0,1=dB2,2=dB4,3=dB6
++        powerRampingStep                                            = 2;
++#ra_ReponseWindow
++#1,2,4,8,10,20,40,80
++        ra_ResponseWindow                                           = 5;
++#ssb_perRACH_OccasionAndCB_PreamblesPerSSB_PR
++#1=oneeighth,2=onefourth,3=half,4=one,5=two,6=four,7=eight,8=sixteen
++        ssb_perRACH_OccasionAndCB_PreamblesPerSSB_PR                = 3;
++#oneHalf (0..15) 4,8,12,16,...60,64
++        ssb_perRACH_OccasionAndCB_PreamblesPerSSB                   = 15;
++#ra_ContentionResolutionTimer
++#(0..7) 8,16,24,32,40,48,56,64
++        ra_ContentionResolutionTimer                                = 7;
++        rsrp_ThresholdSSB                                           = 19;
++#prach-RootSequenceIndex_PR
++#1 = 839, 2 = 139
++        prach_RootSequenceIndex_PR                                  = 2;
++        prach_RootSequenceIndex                                     = 1;
++        # SCS for msg1, can only be 15 for 30 kHz < 6 GHz, takes precendence over the one derived from prach-ConfigIndex
++        #
++        msg1_SubcarrierSpacing                                      = 1,
++# restrictedSetConfig
++# 0=unrestricted, 1=restricted type A, 2=restricted type B
++        restrictedSetConfig                                         = 0,
++
++        msg3_DeltaPreamble                                          = 2;
++        p0_NominalWithGrant                                         =-96;
++
++# pucch-ConfigCommon setup :
++# pucchGroupHopping
++# 0 = neither, 1= group hopping, 2=sequence hopping
++        pucchGroupHopping                                           = 0;
++        hoppingId                                                   = 0;
++        p0_nominal                                                  = -96;
++# ssb_PositionsInBurs_BitmapPR
++# 1=short, 2=medium, 3=long
++      ssb_PositionsInBurst_PR                                       = 2;
+       ssb_PositionsInBurst_Bitmap                                   = 1;
+ 
+-      # ssb_periodicityServingCell
+-      # 0 = ms5, 1=ms10, 2=ms20, 3=ms40, 4=ms80, 5=ms160, 6=spare2, 7=spare1
++# ssb_periodicityServingCell
++# 0 = ms5, 1=ms10, 2=ms20, 3=ms40, 4=ms80, 5=ms160, 6=spare2, 7=spare1
+       ssb_periodicityServingCell                                    = 2;
+ 
+-      # dmrs_TypeA_position
+-      # 0 = pos2, 1 = pos3
++# dmrs_TypeA_position
++# 0 = pos2, 1 = pos3
+       dmrs_TypeA_Position                                           = 0;
+ 
+-      # subcarrierSpacing
+-      # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
++# subcarrierSpacing
++# 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
+       subcarrierSpacing                                             = 1;
+ 
+ 
+-      #tdd-UL-DL-ConfigurationCommon
+-      # subcarrierSpacing
+-      # 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
++  #tdd-UL-DL-ConfigurationCommon
++# subcarrierSpacing
++# 0=kHz15, 1=kHz30, 2=kHz60, 3=kHz120
+       referenceSubcarrierSpacing                                    = 1;
+       # pattern1
+       # dl_UL_TransmissionPeriodicity
+       # 0=ms0p5, 1=ms0p625, 2=ms1, 3=ms1p25, 4=ms2, 5=ms2p5, 6=ms5, 7=ms10
+-      dl_UL_TransmissionPeriodicity                                 = 6;
+-      nrofDownlinkSlots                                             = 7;
++      dl_UL_TransmissionPeriodicity                                 = 5;
++      nrofDownlinkSlots                                             = 3;
+       nrofDownlinkSymbols                                           = 6;
+-      nrofUplinkSlots                                               = 2;
++      nrofUplinkSlots                                               = 1;
+       nrofUplinkSymbols                                             = 4;
+ 
+-      ssPBCH_BlockPower                                             = -25;
+-  }
++      ssPBCH_BlockPower                                             = 0;
++     }
++
+   );
+ 
+-  SCTP:
++
++    # ------- SCTP definitions
++    SCTP :
+     {
+-      SCTP_INSTREAMS  = 2;
+-      SCTP_OUTSTREAMS = 2;
++        # Number of streams to use in input/output
++        SCTP_INSTREAMS  = 2;
++        SCTP_OUTSTREAMS = 2;
+     };
+-}
++  }
+ );
+ 
+-MACRLCs =
+-(
+-    {
+-        num_cc             = 1;
+-        tr_s_preference    = "local_L1";
+-        tr_n_preference    = "f1";
+-        local_n_if_name    = "{{ du_f1_interface_name }}";
+-        local_n_address    = "{{ du_f1_ip_address }}";
+-        remote_n_address   = "{{ cu_f1_ip_address }}";
+-        local_n_portc      = 500;
+-        local_n_portd      = {{ du_f1_port }};
+-        remote_n_portc     = 501;
+-        remote_n_portd     = {{ cu_f1_port }};
+-        pusch_TargetSNRx10 = 150;
+-        pucch_TargetSNRx10 = 200;
+-        ul_prbblack_SNR_threshold   = 10;
+-        ulsch_max_frame_inactivity  = 0;
+-
+-    }
+-);
++MACRLCs = (
++  {
++    num_cc           = 1;
++    tr_s_preference  = "local_L1";
++    tr_n_preference  = "f1";
++    local_n_if_name = "{{ du_f1_interface_name }}";
++    local_n_address = "{{ du_f1_ip_address }}";
++    remote_n_address = "{{ cu_f1_ip_address }}";
++    local_n_portc   = 500;
++    local_n_portd   = {{ du_f1_port }};
++    remote_n_portc  = 501;
++    remote_n_portd  = {{ cu_f1_port }};
+ 
+-L1s =
+-(
+-    {
+-        num_cc               = 1;
+-        tr_n_preference      = "local_mac";
+-        prach_dtx_threshold  = 120;
+-        pucch0_dtx_threshold = 100;
+-        ofdm_offset_divisor  = 8;
+-    }
++  }
+ );
+ 
+-RUs =
+-(
+-    {
+-        local_rf                      = "yes"
+-        nb_tx                         = 1
+-        nb_rx                         = 1
+-        att_tx                        = 12;
+-        att_rx                        = 12;
+-        bands                         = [77];
+-        max_pdschReferenceSignalPower = -27;
+-        max_rxgain                    = 114;
+-        eNB_instances                 = [0];
+-        bf_weights                    = [0x00007fff, 0x0000, 0x0000, 0x0000];
+-        clock_src                     = "internal";
+-    }
++L1s = (
++{
++  num_cc = 1;
++  tr_n_preference = "local_mac";
++  prach_dtx_threshold = 130
++  pucch0_dtx_threshold = 80;
++  pusch_dtx_threshold = 10;
++  max_ldpc_iterations = 10;
++  tx_amp_backoff_dB = 20; # needs to match O-RU configuration
++  L1_rx_thread_core = 8;
++  L1_tx_thread_core = 10;
++  phase_compensation = 1; # needs to match O-RU configuration
++}
+ );
+ 
+-THREAD_STRUCT =
+-(
+-    {
+-        parallel_config = "PARALLEL_SINGLE_THREAD";
+-        worker_config   = "WORKER_ENABLE";
+-    }
++RUs = (
++{
++  local_rf       = "no";
++  nb_tx          = 4;
++  nb_rx          = 4;
++  att_tx         = 0; # TODO relevant?
++  att_rx         = 0; # TODO relevant?
++  bands          = [78];
++  max_pdschReferenceSignalPower = -27;
++  max_rxgain                    = 75; # TODO relevant?
++  sf_extension                  = 0; # TODO relevant?
++  eNB_instances  = [0]; # TODO is relevant?
++  ru_thread_core = 6;
++  sl_ahead       = 5;
++  ##beamforming 1x2 matrix: 1 layer x 2 antennas
++  bf_weights = [0x00007fff, 0x0000,0x00007fff, 0x0000]; # necessary?
++
++  tr_preference  = "raw_if4p5"; # important: activate FHI7.2
++  do_precoding = 0; # needs to match O-RU configuration
++
++}
+ );
+ 
+-log_config: {
+-    global_log_options = "level,nocolor,time";
+-    global_log_level   = "info";
+-    hw_log_level       = "info";
+-    phy_log_level      = "info";
+-    mac_log_level      = "info";
+-    rlc_log_level      = "info";
+-    f1ap_log_level     = "info";
+-};
+-{% if simulation_mode %}
+-rfsimulator: {
+-    serveraddr = "server";
+-    serverport = 4043;
+-    options    = ();
+-    modelname  = "AWGN";
+-    IQfile     = "/tmp/rfsimulator.iqs"
++
++
++     log_config :
++     {
++       global_log_level                      ="info";
++       hw_log_level                          ="info";
++       phy_log_level                         ="info";
++       mac_log_level                         ="info";
++       rlc_log_level                         ="info";
++       pdcp_log_level                        ="info";
++       rrc_log_level                         ="info";
++       f1ap_log_level                         ="debug";
++       ngap_log_level                         ="debug";
++    };
++
++fhi_72 = {
++  dpdk_devices = ("0000:8a:02.0", "0000:8a:02.1");
++  system_core = 0;
++  io_core = 4;
++  worker_cores = (2);
++  du_addr = ("00:11:22:33:44:99", "00:11:22:33:44:99");
++  ru_addr = ("e8:c7:4f:1e:c7:4d", "e8:c7:4f:1e:c7:4d");
++  mtu = 1500; # check if xran uses this properly
++  fh_config = ({
++    Tadv_cp_dl = 125;
++    T2a_cp_dl = (285, 429); # (min, max)
++    T2a_cp_ul = (285, 429); # (min, max)
++    T2a_up = (125, 428); # (min, max)
++    Ta3 = (130, 170); # (min, max)
++    T1a_cp_dl = (285, 429); # (min, max)
++    T1a_cp_ul = (285, 429); # (min, max)
++    T1a_up = (96, 196); # (min, max)
++    Ta4 = (110, 180); # (min, max)
++    ru_config = {
++      iq_width = 9;
++      iq_width_prach = 9;
++      fft_size = 12;
++    };
++    prach_config = {
++      eAxC_offset = 4;
++      kbar = 0;
++    };
++  });
+ };
+-{% endif %}
+diff --git a/tests/unit/fixtures.py b/tests/unit/fixtures.py
+index 4528d3b..e075451 100644
+--- a/tests/unit/fixtures.py
++++ b/tests/unit/fixtures.py
+@@ -29,7 +29,7 @@ F1_PROVIDER_DATA_WITH_SD = ProviderAppData(
+ class DUFixtures:
+     patcher_check_output = patch("charm.check_output")
+     patcher_du_security_context = patch("charm.DUSecurityContext")
+-    patcher_du_usb_volume = patch("charm.DUUSBVolume")
++    # patcher_du_usb_volume = patch("charm.DUUSBVolume")
+     patcher_k8s_multus = patch("charm.KubernetesMultusCharmLib")
+     patcher_f1_get_remote_data = patch(
+         "charm.F1Requires.get_provider_f1_information",
+@@ -43,7 +43,7 @@ class DUFixtures:
+     def setUp(self, request):
+         self.mock_check_output = DUFixtures.patcher_check_output.start()
+         self.mock_du_security_context = DUFixtures.patcher_du_security_context.start().return_value
+-        self.mock_du_usb_volume = DUFixtures.patcher_du_usb_volume.start().return_value
++        # self.mock_du_usb_volume = DUFixtures.patcher_du_usb_volume.start().return_value
+         self.mock_k8s_multus = DUFixtures.patcher_k8s_multus.start().return_value
+         self.mock_f1_get_remote_data = DUFixtures.patcher_f1_get_remote_data.start()
+         self.mock_f1_set_information = DUFixtures.patcher_f1_requires_set_f1_information.start()
+diff --git a/tests/unit/test_charm_collect_status.py b/tests/unit/test_charm_collect_status.py
+index b49c90b..8c38a37 100644
+--- a/tests/unit/test_charm_collect_status.py
++++ b/tests/unit/test_charm_collect_status.py
+@@ -79,24 +79,24 @@ class TestCharmCollectStatus(DUFixtures):
+ 
+         assert state_out.unit_status == WaitingStatus("Waiting for statefulset to be patched")
+ 
+-    def test_given_usb_volume_not_mounted_when_collect_status_then_status_is_waiting(self):
+-        self.mock_k8s_multus.multus_is_available.return_value = True
+-        self.mock_k8s_multus.is_ready.return_value = True
+-        self.mock_du_security_context.is_privileged.return_value = True
+-        self.mock_du_usb_volume.is_mounted.return_value = False
+-        state_in = testing.State(
+-            leader=True,
+-        )
++    # def test_given_usb_volume_not_mounted_when_collect_status_then_status_is_waiting(self):
++    #     self.mock_k8s_multus.multus_is_available.return_value = True
++    #     self.mock_k8s_multus.is_ready.return_value = True
++    #     self.mock_du_security_context.is_privileged.return_value = True
++    #     self.mock_du_usb_volume.is_mounted.return_value = False
++    #     state_in = testing.State(
++    #         leader=True,
++    #     )
+ 
+-        state_out = self.ctx.run(self.ctx.on.collect_unit_status(), state_in)
++    #     state_out = self.ctx.run(self.ctx.on.collect_unit_status(), state_in)
+ 
+-        assert state_out.unit_status == WaitingStatus("Waiting for USB device to be mounted")
++    #     assert state_out.unit_status == WaitingStatus("Waiting for USB device to be mounted")
+ 
+     def test_given_f1_relation_not_created_when_collect_status_then_status_is_blocked(self):
+         self.mock_k8s_multus.multus_is_available.return_value = True
+         self.mock_k8s_multus.is_ready.return_value = True
+         self.mock_du_security_context.is_privileged.return_value = True
+-        self.mock_du_usb_volume.is_mounted.return_value = True
++        # self.mock_du_usb_volume.is_mounted.return_value = True
+         state_in = testing.State(
+             leader=True,
+         )
+@@ -109,7 +109,7 @@ class TestCharmCollectStatus(DUFixtures):
+         self.mock_k8s_multus.multus_is_available.return_value = True
+         self.mock_k8s_multus.is_ready.return_value = True
+         self.mock_du_security_context.is_privileged.return_value = True
+-        self.mock_du_usb_volume.is_mounted.return_value = True
++        # self.mock_du_usb_volume.is_mounted.return_value = True
+         f1_relation = testing.Relation(
+             endpoint="fiveg_f1",
+             interface="fiveg_f1",
+@@ -132,7 +132,7 @@ class TestCharmCollectStatus(DUFixtures):
+         self.mock_k8s_multus.multus_is_available.return_value = True
+         self.mock_k8s_multus.is_ready.return_value = True
+         self.mock_du_security_context.is_privileged.return_value = True
+-        self.mock_du_usb_volume.is_mounted.return_value = True
++        # self.mock_du_usb_volume.is_mounted.return_value = True
+         self.mock_check_output.return_value = b""
+         f1_relation = testing.Relation(
+             endpoint="fiveg_f1",
+@@ -156,7 +156,7 @@ class TestCharmCollectStatus(DUFixtures):
+         self.mock_k8s_multus.multus_is_available.return_value = True
+         self.mock_k8s_multus.is_ready.return_value = True
+         self.mock_du_security_context.is_privileged.return_value = True
+-        self.mock_du_usb_volume.is_mounted.return_value = True
++        # self.mock_du_usb_volume.is_mounted.return_value = True
+         self.mock_check_output.return_value = b"1.2.3.4"
+         f1_relation = testing.Relation(
+             endpoint="fiveg_f1",
+@@ -181,7 +181,7 @@ class TestCharmCollectStatus(DUFixtures):
+             self.mock_k8s_multus.multus_is_available.return_value = True
+             self.mock_k8s_multus.is_ready.return_value = True
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_check_output.return_value = b"1.2.3.4"
+             self.mock_f1_get_remote_data.return_value = None
+             f1_relation = testing.Relation(
+@@ -214,7 +214,7 @@ class TestCharmCollectStatus(DUFixtures):
+             self.mock_k8s_multus.multus_is_available.return_value = True
+             self.mock_k8s_multus.is_ready.return_value = True
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_check_output.return_value = b"1.2.3.4"
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
+             f1_relation = testing.Relation(
+diff --git a/tests/unit/test_charm_configure.py b/tests/unit/test_charm_configure.py
+index 6456c3c..2c136cb 100644
+--- a/tests/unit/test_charm_configure.py
++++ b/tests/unit/test_charm_configure.py
+@@ -25,63 +25,63 @@ F1_PROVIDER_DATA_MULTIPLE_PLMNS = ProviderAppData(
+ 
+ 
+ class TestCharmConfigure(DUFixtures):
+-    def test_given_statefulset_is_not_patched_when_configure_then_usb_is_mounted_and_privileged_context_is_set(  # noqa: E501
+-        self,
+-    ):
+-        self.mock_du_security_context.is_privileged.return_value = False
+-        self.mock_du_usb_volume.is_mounted.return_value = False
+-        container = testing.Container(
+-            name="du",
+-            can_connect=True,
+-        )
+-        state_in = testing.State(
+-            leader=True,
+-            containers=[container],
+-        )
+-
+-        self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
+-
+-        self.mock_du_security_context.set_privileged.assert_called_once()
+-        self.mock_du_usb_volume.mount.assert_called_once()
+-
+-    def test_given_simulation_mode_when_configure_then_privileged_context_is_set_but_usb_is_not_mounted(  # noqa: E501
+-        self,
+-    ):
+-        self.mock_du_security_context.is_privileged.return_value = False
+-        self.mock_du_usb_volume.is_mounted.return_value = False
+-        container = testing.Container(
+-            name="du",
+-            can_connect=True,
+-        )
+-        state_in = testing.State(
+-            leader=True,
+-            containers=[container],
+-            config={"simulation-mode": True},
+-        )
+-
+-        self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
+-
+-        self.mock_du_security_context.set_privileged.assert_called_once()
+-        self.mock_du_usb_volume.mount.assert_not_called()
+-
+-    def test_given_statefulset_is_patched_when_configure_then_usb_is_not_mounted_and_privileged_context_is_not_set(  # noqa: E501
+-        self,
+-    ):
+-        self.mock_du_security_context.is_privileged.return_value = True
+-        self.mock_du_usb_volume.is_mounted.return_value = True
+-        container = testing.Container(
+-            name="du",
+-            can_connect=True,
+-        )
+-        state_in = testing.State(
+-            leader=True,
+-            containers=[container],
+-        )
+-
+-        self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
+-
+-        self.mock_du_security_context.set_privileged.assert_not_called()
+-        self.mock_du_usb_volume.mount.assert_not_called()
++    # def test_given_statefulset_is_not_patched_when_configure_then_usb_is_mounted_and_privileged_context_is_set(  # noqa: E501
++    #     self,
++    # ):
++    #     self.mock_du_security_context.is_privileged.return_value = False
++    #     self.mock_du_usb_volume.is_mounted.return_value = False
++    #     container = testing.Container(
++    #         name="du",
++    #         can_connect=True,
++    #     )
++    #     state_in = testing.State(
++    #         leader=True,
++    #         containers=[container],
++    #     )
++
++    #     self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
++
++    #     self.mock_du_security_context.set_privileged.assert_called_once()
++    #     self.mock_du_usb_volume.mount.assert_called_once()
++
++    # def test_given_simulation_mode_when_configure_then_privileged_context_is_set_but_usb_is_not_mounted(  # noqa: E501
++    #     self,
++    # ):
++    #     self.mock_du_security_context.is_privileged.return_value = False
++    #     self.mock_du_usb_volume.is_mounted.return_value = False
++    #     container = testing.Container(
++    #         name="du",
++    #         can_connect=True,
++    #     )
++    #     state_in = testing.State(
++    #         leader=True,
++    #         containers=[container],
++    #         config={"simulation-mode": True},
++    #     )
++
++    #     self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
++
++    #     self.mock_du_security_context.set_privileged.assert_called_once()
++    #     self.mock_du_usb_volume.mount.assert_not_called()
++
++    # def test_given_statefulset_is_patched_when_configure_then_usb_is_not_mounted_and_privileged_context_is_not_set(  # noqa: E501
++    #     self,
++    # ):
++    #     self.mock_du_security_context.is_privileged.return_value = True
++    #     self.mock_du_usb_volume.is_mounted.return_value = True
++    #     container = testing.Container(
++    #         name="du",
++    #         can_connect=True,
++    #     )
++    #     state_in = testing.State(
++    #         leader=True,
++    #         containers=[container],
++    #     )
++
++    #     self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
++
++    #     self.mock_du_security_context.set_privileged.assert_not_called()
++    #     self.mock_du_usb_volume.mount.assert_not_called()
+ 
+     @pytest.mark.parametrize(
+         "f1_provider_data,config_file",
+@@ -101,7 +101,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = f1_provider_data
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -141,7 +141,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -184,7 +184,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -223,7 +223,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -258,7 +258,7 @@ class TestCharmConfigure(DUFixtures):
+                             "du": {
+                                 "startup": "enabled",
+                                 "override": "replace",
+-                                "command": "/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
++                                "command": "/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
+                                 "environment": {"TZ": "UTC"},
+                             }
+                         }
+@@ -285,7 +285,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -324,7 +324,7 @@ class TestCharmConfigure(DUFixtures):
+                             "du": {
+                                 "startup": "enabled",
+                                 "override": "replace",
+-                                "command": f"/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf {three_quarter_sampling_flag}--continuous-tx {rfsim_flag}",  # noqa: E501
++                                "command": f"/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf {three_quarter_sampling_flag}--continuous-tx {rfsim_flag}",  # noqa: E501
+                                 "environment": {"TZ": "UTC"},
+                             }
+                         }
+@@ -337,7 +337,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -372,7 +372,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
+             self.mock_check_output.return_value = None
+             f1_relation = testing.Relation(
+@@ -411,7 +411,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = None
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -450,7 +450,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA_MULTIPLE_PLMNS
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -489,7 +489,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_check_output.return_value = b"1.2.3.4"
+             rfsim_relation = testing.Relation(
+                 endpoint="fiveg_rfsim",
+@@ -523,7 +523,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA_WITH_SD
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -562,7 +562,7 @@ class TestCharmConfigure(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = None
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+diff --git a/tests/unit/test_charm_fiveg_rfsim_relation_changed.py b/tests/unit/test_charm_fiveg_rfsim_relation_changed.py
+index 09be52f..5793b5b 100644
+--- a/tests/unit/test_charm_fiveg_rfsim_relation_changed.py
++++ b/tests/unit/test_charm_fiveg_rfsim_relation_changed.py
+@@ -34,7 +34,7 @@ class TestCharmFivegRFSIMRelationChanged(DUFixtures):
+     ):
+         with tempfile.TemporaryDirectory() as temp_dir:
+             self.mock_du_security_context.is_privileged.return_value = True
+-            self.mock_du_usb_volume.is_mounted.return_value = True
++            # self.mock_du_usb_volume.is_mounted.return_value = True
+             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA_WITH_SD
+             self.mock_check_output.return_value = b"1.2.3.4"
+             f1_relation = testing.Relation(
+@@ -60,7 +60,7 @@ class TestCharmFivegRFSIMRelationChanged(DUFixtures):
+                                 "du": {
+                                     "startup": "enabled",
+                                     "override": "replace",
+-                                    "command": "/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
++                                    "command": "/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
+                                     "environment": {"TZ": "UTC"},
+                                 }
+                             }
+@@ -108,7 +108,7 @@ class TestCharmFivegRFSIMRelationChanged(DUFixtures):
+                                 "du": {
+                                     "startup": "enabled",
+                                     "override": "replace",
+-                                    "command": "/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
++                                    "command": "/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
+                                     "environment": {"TZ": "UTC"},
+                                 }
+                             }
+diff --git a/tests/unit/test_oai_ran_du_k8s.py b/tests/unit/test_oai_ran_du_k8s.py
+index 62c6068..9a5e9eb 100644
+--- a/tests/unit/test_oai_ran_du_k8s.py
++++ b/tests/unit/test_oai_ran_du_k8s.py
+@@ -18,7 +18,8 @@ from lightkube.models.core_v1 import (
+ from lightkube.models.meta_v1 import LabelSelector
+ from lightkube.resources.apps_v1 import StatefulSet
+ 
+-from oai_ran_du_k8s import DUSecurityContext, DUUSBVolume
++from oai_ran_du_k8s import DUSecurityContext
++# , DUUSBVolume
+ 
+ WORKLOAD_CONTAINER_NAME = "du"
+ UNPRIVILEGED_STATEFULSET = StatefulSet(
+@@ -53,45 +54,45 @@ PRIVILEGED_STATEFULSET = StatefulSet(
+         ),
+     )
+ )
+-USB_MOUNTED_STATEFULSET = StatefulSet(
+-    spec=StatefulSetSpec(
+-        selector=LabelSelector(),
+-        serviceName="whatever",
+-        template=PodTemplateSpec(
+-            spec=PodSpec(
+-                containers=[
+-                    Container(
+-                        name=WORKLOAD_CONTAINER_NAME,
+-                        securityContext=SecurityContext(privileged=True),
+-                        volumeMounts=[VolumeMount(name="usb", mountPath="/dev/bus/usb")],
+-                    )
+-                ],
+-                volumes=[
+-                    Volume(
+-                        name="usb",
+-                        hostPath=HostPathVolumeSource(path="/dev/bus/usb", type=""),
+-                    )
+-                ],
+-            )
+-        ),
+-    )
+-)
+-USB_UNMOUNTED_STATEFULSET = StatefulSet(
+-    spec=StatefulSetSpec(
+-        selector=LabelSelector(),
+-        serviceName="whatever",
+-        template=PodTemplateSpec(
+-            spec=PodSpec(
+-                containers=[
+-                    Container(
+-                        name=WORKLOAD_CONTAINER_NAME,
+-                        securityContext=SecurityContext(privileged=True),
+-                    )
+-                ],
+-            )
+-        ),
+-    )
+-)
++# USB_MOUNTED_STATEFULSET = StatefulSet(
++#     spec=StatefulSetSpec(
++#         selector=LabelSelector(),
++#         serviceName="whatever",
++#         template=PodTemplateSpec(
++#             spec=PodSpec(
++#                 containers=[
++#                     Container(
++#                         name=WORKLOAD_CONTAINER_NAME,
++#                         securityContext=SecurityContext(privileged=True),
++#                         volumeMounts=[VolumeMount(name="usb", mountPath="/dev/bus/usb")],
++#                     )
++#                 ],
++#                 volumes=[
++#                     Volume(
++#                         name="usb",
++#                         hostPath=HostPathVolumeSource(path="/dev/bus/usb", type=""),
++#                     )
++#                 ],
++#             )
++#         ),
++#     )
++# )
++# USB_UNMOUNTED_STATEFULSET = StatefulSet(
++#     spec=StatefulSetSpec(
++#         selector=LabelSelector(),
++#         serviceName="whatever",
++#         template=PodTemplateSpec(
++#             spec=PodSpec(
++#                 containers=[
++#                     Container(
++#                         name=WORKLOAD_CONTAINER_NAME,
++#                         securityContext=SecurityContext(privileged=True),
++#                     )
++#                 ],
++#             )
++#         ),
++#     )
++# )
+ 
+ 
+ class TestDUSecurityContext:
+@@ -172,66 +173,66 @@ class TestDUUSBVolume:
+             TestDUSecurityContext.patcher_lightkube_client_replace.start()
+         )
+ 
+-    def test_given_usb_volume_not_mounted_when_is_mounted_then_return_false(self):
+-        self.mock_lightkube_client_get.return_value = USB_UNMOUNTED_STATEFULSET
+-
+-        du_usb_volume = DUUSBVolume(
+-            namespace="my-namespace",
+-            statefulset_name="my-statefulset-name",
+-            unit_name="my-unit-name",
+-            container_name=WORKLOAD_CONTAINER_NAME,
+-        )
+-
+-        assert not du_usb_volume.is_mounted()
+-
+-    def test_given_usb_volume_mounted_when_is_mounted_then_return_true(self):
+-        self.mock_lightkube_client_get.return_value = USB_MOUNTED_STATEFULSET
+-
+-        du_usb_volume = DUUSBVolume(
+-            namespace="my-namespace",
+-            statefulset_name="my-statefulset-name",
+-            unit_name="my-unit-name",
+-            container_name=WORKLOAD_CONTAINER_NAME,
+-        )
+-
+-        assert du_usb_volume.is_mounted()
+-
+-    def test_given_usb_volume_not_mounted_when_mount_usb_then_usb_is_mounted(self):
+-        self.mock_lightkube_client_get.return_value = USB_UNMOUNTED_STATEFULSET
+-
+-        du_usb_volume = DUUSBVolume(
+-            namespace="my-namespace",
+-            statefulset_name="my-statefulset-name",
+-            unit_name="my-unit-name",
+-            container_name=WORKLOAD_CONTAINER_NAME,
+-        )
+-
+-        du_usb_volume.mount()
+-
+-        self.mock_lightkube_client_replace.assert_called_once_with(
+-            obj=StatefulSet(
+-                spec=StatefulSetSpec(
+-                    selector=LabelSelector(),
+-                    serviceName="whatever",
+-                    template=PodTemplateSpec(
+-                        spec=PodSpec(
+-                            containers=[
+-                                Container(
+-                                    name=WORKLOAD_CONTAINER_NAME,
+-                                    securityContext=SecurityContext(privileged=True),
+-                                    volumeMounts=[
+-                                        VolumeMount(name="usb", mountPath="/dev/bus/usb")
+-                                    ],
+-                                )
+-                            ],
+-                            volumes=[
+-                                Volume(
+-                                    name="usb",
+-                                    hostPath=HostPathVolumeSource(path="/dev/bus/usb", type=""),
+-                                )
+-                            ],
+-                        )
+-                    ),
+-                )
+-            )
+-        )
++    # def test_given_usb_volume_not_mounted_when_is_mounted_then_return_false(self):
++    #     self.mock_lightkube_client_get.return_value = USB_UNMOUNTED_STATEFULSET
++
++    #     du_usb_volume = DUUSBVolume(
++    #         namespace="my-namespace",
++    #         statefulset_name="my-statefulset-name",
++    #         unit_name="my-unit-name",
++    #         container_name=WORKLOAD_CONTAINER_NAME,
++    #     )
++
++    #     assert not du_usb_volume.is_mounted()
++
++    # def test_given_usb_volume_mounted_when_is_mounted_then_return_true(self):
++    #     self.mock_lightkube_client_get.return_value = USB_MOUNTED_STATEFULSET
++
++    #     du_usb_volume = DUUSBVolume(
++    #         namespace="my-namespace",
++    #         statefulset_name="my-statefulset-name",
++    #         unit_name="my-unit-name",
++    #         container_name=WORKLOAD_CONTAINER_NAME,
++    #     )
++
++    #     assert du_usb_volume.is_mounted()
++
++    # def test_given_usb_volume_not_mounted_when_mount_usb_then_usb_is_mounted(self):
++    #     self.mock_lightkube_client_get.return_value = USB_UNMOUNTED_STATEFULSET
++
++    #     du_usb_volume = DUUSBVolume(
++    #         namespace="my-namespace",
++    #         statefulset_name="my-statefulset-name",
++    #         unit_name="my-unit-name",
++    #         container_name=WORKLOAD_CONTAINER_NAME,
++    #     )
++
++    #     du_usb_volume.mount()
++
++    #     self.mock_lightkube_client_replace.assert_called_once_with(
++    #         obj=StatefulSet(
++    #             spec=StatefulSetSpec(
++    #                 selector=LabelSelector(),
++    #                 serviceName="whatever",
++    #                 template=PodTemplateSpec(
++    #                     spec=PodSpec(
++    #                         containers=[
++    #                             Container(
++    #                                 name=WORKLOAD_CONTAINER_NAME,
++    #                                 securityContext=SecurityContext(privileged=True),
++    #                                 volumeMounts=[
++    #                                     VolumeMount(name="usb", mountPath="/dev/bus/usb")
++    #                                 ],
++    #                             )
++    #                         ],
++    #                         volumes=[
++    #                             Volume(
++    #                                 name="usb",
++    #                                 hostPath=HostPathVolumeSource(path="/dev/bus/usb", type=""),
++    #                             )
++    #                         ],
++    #                     )
++    #                 ),
++    #             )
++    #         )
++    #     )

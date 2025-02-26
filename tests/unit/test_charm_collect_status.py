@@ -79,24 +79,24 @@ class TestCharmCollectStatus(DUFixtures):
 
         assert state_out.unit_status == WaitingStatus("Waiting for statefulset to be patched")
 
-    def test_given_usb_volume_not_mounted_when_collect_status_then_status_is_waiting(self):
-        self.mock_k8s_multus.multus_is_available.return_value = True
-        self.mock_k8s_multus.is_ready.return_value = True
-        self.mock_du_security_context.is_privileged.return_value = True
-        self.mock_du_usb_volume.is_mounted.return_value = False
-        state_in = testing.State(
-            leader=True,
-        )
+    # def test_given_usb_volume_not_mounted_when_collect_status_then_status_is_waiting(self):
+    #     self.mock_k8s_multus.multus_is_available.return_value = True
+    #     self.mock_k8s_multus.is_ready.return_value = True
+    #     self.mock_du_security_context.is_privileged.return_value = True
+    #     self.mock_du_usb_volume.is_mounted.return_value = False
+    #     state_in = testing.State(
+    #         leader=True,
+    #     )
 
-        state_out = self.ctx.run(self.ctx.on.collect_unit_status(), state_in)
+    #     state_out = self.ctx.run(self.ctx.on.collect_unit_status(), state_in)
 
-        assert state_out.unit_status == WaitingStatus("Waiting for USB device to be mounted")
+    #     assert state_out.unit_status == WaitingStatus("Waiting for USB device to be mounted")
 
     def test_given_f1_relation_not_created_when_collect_status_then_status_is_blocked(self):
         self.mock_k8s_multus.multus_is_available.return_value = True
         self.mock_k8s_multus.is_ready.return_value = True
         self.mock_du_security_context.is_privileged.return_value = True
-        self.mock_du_usb_volume.is_mounted.return_value = True
+        # self.mock_du_usb_volume.is_mounted.return_value = True
         state_in = testing.State(
             leader=True,
         )
@@ -109,7 +109,7 @@ class TestCharmCollectStatus(DUFixtures):
         self.mock_k8s_multus.multus_is_available.return_value = True
         self.mock_k8s_multus.is_ready.return_value = True
         self.mock_du_security_context.is_privileged.return_value = True
-        self.mock_du_usb_volume.is_mounted.return_value = True
+        # self.mock_du_usb_volume.is_mounted.return_value = True
         f1_relation = testing.Relation(
             endpoint="fiveg_f1",
             interface="fiveg_f1",
@@ -132,7 +132,7 @@ class TestCharmCollectStatus(DUFixtures):
         self.mock_k8s_multus.multus_is_available.return_value = True
         self.mock_k8s_multus.is_ready.return_value = True
         self.mock_du_security_context.is_privileged.return_value = True
-        self.mock_du_usb_volume.is_mounted.return_value = True
+        # self.mock_du_usb_volume.is_mounted.return_value = True
         self.mock_check_output.return_value = b""
         f1_relation = testing.Relation(
             endpoint="fiveg_f1",
@@ -156,7 +156,7 @@ class TestCharmCollectStatus(DUFixtures):
         self.mock_k8s_multus.multus_is_available.return_value = True
         self.mock_k8s_multus.is_ready.return_value = True
         self.mock_du_security_context.is_privileged.return_value = True
-        self.mock_du_usb_volume.is_mounted.return_value = True
+        # self.mock_du_usb_volume.is_mounted.return_value = True
         self.mock_check_output.return_value = b"1.2.3.4"
         f1_relation = testing.Relation(
             endpoint="fiveg_f1",
@@ -181,7 +181,7 @@ class TestCharmCollectStatus(DUFixtures):
             self.mock_k8s_multus.multus_is_available.return_value = True
             self.mock_k8s_multus.is_ready.return_value = True
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_check_output.return_value = b"1.2.3.4"
             self.mock_f1_get_remote_data.return_value = None
             f1_relation = testing.Relation(
@@ -214,7 +214,7 @@ class TestCharmCollectStatus(DUFixtures):
             self.mock_k8s_multus.multus_is_available.return_value = True
             self.mock_k8s_multus.is_ready.return_value = True
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_check_output.return_value = b"1.2.3.4"
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
             f1_relation = testing.Relation(

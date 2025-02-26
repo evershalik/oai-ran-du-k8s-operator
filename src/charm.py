@@ -32,7 +32,8 @@ from ops.charm import CharmBase
 from ops.pebble import Layer
 
 from charm_config import CharmConfig, CharmConfigInvalidError, CNIType
-from oai_ran_du_k8s import DUSecurityContext, DUUSBVolume
+from oai_ran_du_k8s import DUSecurityContext
+# , DUUSBVolume
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +63,12 @@ class OAIRANDUOperator(CharmBase):
             statefulset_name=self.app.name,
             container_name=self._container_name,
         )
-        self._usb_volume = DUUSBVolume(
-            namespace=self.model.name,
-            statefulset_name=self.app.name,
-            unit_name=self.unit.name,
-            container_name=self._container_name,
-        )
+        # self._usb_volume = DUUSBVolume(
+        #     namespace=self.model.name,
+        #     statefulset_name=self.app.name,
+        #     unit_name=self.unit.name,
+        #     container_name=self._container_name,
+        # )
         try:
             self._charm_config: CharmConfig = CharmConfig.from_charm(charm=self)
         except CharmConfigInvalidError:
@@ -123,10 +124,14 @@ class OAIRANDUOperator(CharmBase):
             event.add_status(WaitingStatus("Waiting for statefulset to be patched"))
             logger.info("Waiting for statefulset to be patched")
             return
-        if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
-            event.add_status(WaitingStatus("Waiting for USB device to be mounted"))
-            logger.info("Waiting for USB device to be mounted")
-            return
+        # if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
+        #     event.add_status(WaitingStatus("Waiting for USB device to be mounted"))
+        #     logger.info("Waiting for USB device to be mounted")
+        #     return
+        # insert a new SR-IOV VF check:
+        if not self._charm_config.simulation_mode and not self._du_security_context.sriov_vfs_attached():
+            event.add_status(WaitingStatus("Waiting for SR-IOV resources to be attached"))
+            logger.info("Waiting for SR-IOV resources to be attached")
         if not self._relation_created(F1_RELATION_NAME):
             event.add_status(BlockedStatus("Waiting for F1 relation to be created"))
             logger.info("Waiting for F1 relation to be created")
@@ -164,8 +169,10 @@ class OAIRANDUOperator(CharmBase):
             return
         if not self._du_security_context.is_privileged():
             self._du_security_context.set_privileged()
-        if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
-            self._usb_volume.mount()
+        # if not self._charm_config.simulation_mode and not self._usb_volume.is_mounted():
+        #     self._usb_volume.mount()
+        if not self._charm_config.simulation_mode and not self._du_security_context.sriov_vfs_attached():
+            self._du_security_context.attach_sriov_resources()
         if not self._relation_created(F1_RELATION_NAME):
             return
         if not self._container.can_connect():
@@ -425,7 +432,8 @@ class OAIRANDUOperator(CharmBase):
         if self._charm_config.simulation_mode:
             rfsim_switch = "--rfsim"
 
-        return f"/opt/oai-gnb/bin/nr-softmodem -O {BASE_CONFIG_PATH}/{CONFIG_FILE_NAME} {three_quarter_sampling}--continuous-tx {rfsim_switch}"  # noqa: E501
+        # return f"/opt/oai-du/bin/oai_du_7.2x -O {BASE_CONFIG_PATH}/{CONFIG_FILE_NAME} {three_quarter_sampling}--continuous-tx {rfsim_switch}"  # noqa: E501
+        return f"sleep 10000000000"  # noqa: E501
 
     @property
     def _du_environment_variables(self) -> dict:

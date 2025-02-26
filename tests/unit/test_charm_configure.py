@@ -25,63 +25,63 @@ F1_PROVIDER_DATA_MULTIPLE_PLMNS = ProviderAppData(
 
 
 class TestCharmConfigure(DUFixtures):
-    def test_given_statefulset_is_not_patched_when_configure_then_usb_is_mounted_and_privileged_context_is_set(  # noqa: E501
-        self,
-    ):
-        self.mock_du_security_context.is_privileged.return_value = False
-        self.mock_du_usb_volume.is_mounted.return_value = False
-        container = testing.Container(
-            name="du",
-            can_connect=True,
-        )
-        state_in = testing.State(
-            leader=True,
-            containers=[container],
-        )
+    # def test_given_statefulset_is_not_patched_when_configure_then_usb_is_mounted_and_privileged_context_is_set(  # noqa: E501
+    #     self,
+    # ):
+    #     self.mock_du_security_context.is_privileged.return_value = False
+    #     self.mock_du_usb_volume.is_mounted.return_value = False
+    #     container = testing.Container(
+    #         name="du",
+    #         can_connect=True,
+    #     )
+    #     state_in = testing.State(
+    #         leader=True,
+    #         containers=[container],
+    #     )
 
-        self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
+    #     self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
 
-        self.mock_du_security_context.set_privileged.assert_called_once()
-        self.mock_du_usb_volume.mount.assert_called_once()
+    #     self.mock_du_security_context.set_privileged.assert_called_once()
+    #     self.mock_du_usb_volume.mount.assert_called_once()
 
-    def test_given_simulation_mode_when_configure_then_privileged_context_is_set_but_usb_is_not_mounted(  # noqa: E501
-        self,
-    ):
-        self.mock_du_security_context.is_privileged.return_value = False
-        self.mock_du_usb_volume.is_mounted.return_value = False
-        container = testing.Container(
-            name="du",
-            can_connect=True,
-        )
-        state_in = testing.State(
-            leader=True,
-            containers=[container],
-            config={"simulation-mode": True},
-        )
+    # def test_given_simulation_mode_when_configure_then_privileged_context_is_set_but_usb_is_not_mounted(  # noqa: E501
+    #     self,
+    # ):
+    #     self.mock_du_security_context.is_privileged.return_value = False
+    #     self.mock_du_usb_volume.is_mounted.return_value = False
+    #     container = testing.Container(
+    #         name="du",
+    #         can_connect=True,
+    #     )
+    #     state_in = testing.State(
+    #         leader=True,
+    #         containers=[container],
+    #         config={"simulation-mode": True},
+    #     )
 
-        self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
+    #     self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
 
-        self.mock_du_security_context.set_privileged.assert_called_once()
-        self.mock_du_usb_volume.mount.assert_not_called()
+    #     self.mock_du_security_context.set_privileged.assert_called_once()
+    #     self.mock_du_usb_volume.mount.assert_not_called()
 
-    def test_given_statefulset_is_patched_when_configure_then_usb_is_not_mounted_and_privileged_context_is_not_set(  # noqa: E501
-        self,
-    ):
-        self.mock_du_security_context.is_privileged.return_value = True
-        self.mock_du_usb_volume.is_mounted.return_value = True
-        container = testing.Container(
-            name="du",
-            can_connect=True,
-        )
-        state_in = testing.State(
-            leader=True,
-            containers=[container],
-        )
+    # def test_given_statefulset_is_patched_when_configure_then_usb_is_not_mounted_and_privileged_context_is_not_set(  # noqa: E501
+    #     self,
+    # ):
+    #     self.mock_du_security_context.is_privileged.return_value = True
+    #     self.mock_du_usb_volume.is_mounted.return_value = True
+    #     container = testing.Container(
+    #         name="du",
+    #         can_connect=True,
+    #     )
+    #     state_in = testing.State(
+    #         leader=True,
+    #         containers=[container],
+    #     )
 
-        self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
+    #     self.ctx.run(self.ctx.on.pebble_ready(container), state_in)
 
-        self.mock_du_security_context.set_privileged.assert_not_called()
-        self.mock_du_usb_volume.mount.assert_not_called()
+    #     self.mock_du_security_context.set_privileged.assert_not_called()
+    #     self.mock_du_usb_volume.mount.assert_not_called()
 
     @pytest.mark.parametrize(
         "f1_provider_data,config_file",
@@ -101,7 +101,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = f1_provider_data
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -141,7 +141,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -184,7 +184,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -223,7 +223,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -258,7 +258,7 @@ class TestCharmConfigure(DUFixtures):
                             "du": {
                                 "startup": "enabled",
                                 "override": "replace",
-                                "command": "/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
+                                "command": "/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
                                 "environment": {"TZ": "UTC"},
                             }
                         }
@@ -285,7 +285,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -324,7 +324,7 @@ class TestCharmConfigure(DUFixtures):
                             "du": {
                                 "startup": "enabled",
                                 "override": "replace",
-                                "command": f"/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf {three_quarter_sampling_flag}--continuous-tx {rfsim_flag}",  # noqa: E501
+                                "command": f"/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf {three_quarter_sampling_flag}--continuous-tx {rfsim_flag}",  # noqa: E501
                                 "environment": {"TZ": "UTC"},
                             }
                         }
@@ -337,7 +337,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -372,7 +372,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA
             self.mock_check_output.return_value = None
             f1_relation = testing.Relation(
@@ -411,7 +411,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = None
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -450,7 +450,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA_MULTIPLE_PLMNS
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -489,7 +489,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_check_output.return_value = b"1.2.3.4"
             rfsim_relation = testing.Relation(
                 endpoint="fiveg_rfsim",
@@ -523,7 +523,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA_WITH_SD
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -562,7 +562,7 @@ class TestCharmConfigure(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = None
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(

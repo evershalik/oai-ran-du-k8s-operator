@@ -34,7 +34,7 @@ class TestCharmFivegRFSIMRelationChanged(DUFixtures):
     ):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.mock_du_security_context.is_privileged.return_value = True
-            self.mock_du_usb_volume.is_mounted.return_value = True
+            # self.mock_du_usb_volume.is_mounted.return_value = True
             self.mock_f1_get_remote_data.return_value = F1_PROVIDER_DATA_WITH_SD
             self.mock_check_output.return_value = b"1.2.3.4"
             f1_relation = testing.Relation(
@@ -60,7 +60,7 @@ class TestCharmFivegRFSIMRelationChanged(DUFixtures):
                                 "du": {
                                     "startup": "enabled",
                                     "override": "replace",
-                                    "command": "/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
+                                    "command": "/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
                                     "environment": {"TZ": "UTC"},
                                 }
                             }
@@ -108,7 +108,7 @@ class TestCharmFivegRFSIMRelationChanged(DUFixtures):
                                 "du": {
                                     "startup": "enabled",
                                     "override": "replace",
-                                    "command": "/opt/oai-gnb/bin/nr-softmodem -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
+                                    "command": "/opt/oai-du/bin/oai_du_7.2x -O /tmp/conf/du.conf --continuous-tx ",  # noqa: E501
                                     "environment": {"TZ": "UTC"},
                                 }
                             }

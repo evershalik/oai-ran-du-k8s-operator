@@ -1,9 +1,9 @@
 type: charm
-name: oai-ran-du-k8s
+name: du
 summary: Charmed Operator for the OAI RAN Distributed Unit (DU).
 description: Charmed Operator for the OAI RAN Distributed Unit (DU).
-base: ubuntu@24.04
-build-base: ubuntu@24.04
+base: ubuntu@22.04
+build-base: ubuntu@22.04
 platforms:
   amd64:
 
@@ -11,9 +11,9 @@ links:
   website:
     - https://charmhub.io/oai-ran-du-k8s
   source:
-    - https://github.com/canonical/oai-ran-du-k8s-operator
+    - https://github.com/Backend-Slayer/oai-ran-du-k8s-operator
   issues:
-    - https://github.com/canonical/oai-ran-du-k8s-operator/issues
+    - https://github.com/Backend-Slayer/oai-ran-du-k8s-operator/issues
 
 containers:
   du:
@@ -31,7 +31,7 @@ resources:
   du-image:
     type: oci-image
     description: Container image for the OAI RAN Distributed Unit (DU).
-    upstream-source: ghcr.io/canonical/oai-ran-du:2.2.0
+    upstream-source: docker.io/shivank1128/oai-du:legacy
 
 provides:
   fiveg_rfsim:
@@ -85,6 +85,7 @@ parts:
       - libffi-dev
       - libssl-dev
       - pkg-config
+      - iproute2
     build-snaps:
       - astral-uv
       - rustup

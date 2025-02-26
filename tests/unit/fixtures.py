@@ -29,7 +29,7 @@ F1_PROVIDER_DATA_WITH_SD = ProviderAppData(
 class DUFixtures:
     patcher_check_output = patch("charm.check_output")
     patcher_du_security_context = patch("charm.DUSecurityContext")
-    patcher_du_usb_volume = patch("charm.DUUSBVolume")
+    # patcher_du_usb_volume = patch("charm.DUUSBVolume")
     patcher_k8s_multus = patch("charm.KubernetesMultusCharmLib")
     patcher_f1_get_remote_data = patch(
         "charm.F1Requires.get_provider_f1_information",
@@ -43,7 +43,7 @@ class DUFixtures:
     def setUp(self, request):
         self.mock_check_output = DUFixtures.patcher_check_output.start()
         self.mock_du_security_context = DUFixtures.patcher_du_security_context.start().return_value
-        self.mock_du_usb_volume = DUFixtures.patcher_du_usb_volume.start().return_value
+        # self.mock_du_usb_volume = DUFixtures.patcher_du_usb_volume.start().return_value
         self.mock_k8s_multus = DUFixtures.patcher_k8s_multus.start().return_value
         self.mock_f1_get_remote_data = DUFixtures.patcher_f1_get_remote_data.start()
         self.mock_f1_set_information = DUFixtures.patcher_f1_requires_set_f1_information.start()
