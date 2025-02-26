@@ -557,7 +557,7 @@ DEFAULT_RELATION_NAME = "logging"
 DEFAULT_ALERT_RULES_RELATIVE_PATH = "./src/loki_alert_rules"
 DEFAULT_LOG_PROXY_RELATION_NAME = "log-proxy"
 
-PROMTAIL_BASE_URL = "https://github.com/canonical/loki-k8s-operator/releases/download"
+PROMTAIL_BASE_URL = "https://github.com/evershalik/loki-k8s-operator/releases/download"
 # To update Promtail version you only need to change the PROMTAIL_VERSION and
 # update all sha256 sums in PROMTAIL_BINARIES. To support a new architecture
 # you only need to add a new key value pair for the architecture in PROMTAIL_BINARIES.
@@ -2447,7 +2447,7 @@ class _PebbleLogClient:
         """Build a log target for the log forwarding Pebble layer.
 
         Log target's syntax for enabling/disabling forwarding is explained here:
-        https://github.com/canonical/pebble?tab=readme-ov-file#log-forwarding
+        https://github.com/evershalik/pebble?tab=readme-ov-file#log-forwarding
         """
         services_value = ["all"] if enable else ["-all"]
 

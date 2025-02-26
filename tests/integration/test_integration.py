@@ -163,9 +163,9 @@ async def _deploy_nrf(ops_test: OpsTest):
 
 
 async def _deploy_nms_mock(ops_test: OpsTest):
-    fiveg_core_gnb_lib_url = "https://github.com/canonical/sdcore-nms-k8s-operator/raw/main/lib/charms/sdcore_nms_k8s/v0/fiveg_core_gnb.py"
+    fiveg_core_gnb_lib_url = "https://github.com/evershalik/sdcore-nms-k8s-operator/raw/main/lib/charms/sdcore_nms_k8s/v0/fiveg_core_gnb.py"
     fiveg_core_gnb_lib = requests.get(fiveg_core_gnb_lib_url, timeout=10).text
-    sdcore_config_lib_url = "https://github.com/canonical/sdcore-nms-k8s-operator/raw/main/lib/charms/sdcore_nms_k8s/v0/sdcore_config.py"
+    sdcore_config_lib_url = "https://github.com/evershalik/sdcore-nms-k8s-operator/raw/main/lib/charms/sdcore_nms_k8s/v0/sdcore_config.py"
     sdcore_config_lib = requests.get(sdcore_config_lib_url, timeout=10).text
     any_charm_src_overwrite = {
         "fiveg_core_gnb.py": fiveg_core_gnb_lib,
